@@ -40,6 +40,66 @@ init(autoreset=True)
 load_dotenv(override=True)
 
 # ============================================================================
+# PAPER TRADING MODE (set PAPER_TRADING=true in .env to simulate orders)
+# ============================================================================
+PAPER_TRADING = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+# ============================================================================
+# FILE LOGGING (tee every print to a plain-text dated log file)
+# ============================================================================
+import re as _re
+_ANSI_ESCAPE = _re.compile(r'\x1b\[[0-9;]*[mGKJ]')
+
+class _FileTee:
+    """Forward all writes to original stdout AND a stripped log file."""
+    def __init__(self, stream, filepath):
+        self._stream = stream
+        try:
+            self._file = open(filepath, 'a', encoding='utf-8', buffering=1)
+        except OSError:
+            self._file = None
+    def write(self, data):
+        self._stream.write(data)
+        if self._file:
+            self._file.write(_ANSI_ESCAPE.sub('', data))
+    def flush(self):
+        self._stream.flush()
+        if self._file:
+            self._file.flush()
+    def close(self):
+        if self._file:
+            self._file.close()
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+_log_filename = f"trading_agent_{datetime.now().strftime('%Y%m%d')}.log"
+sys.stdout = _FileTee(sys.stdout, _log_filename)
+
+# ============================================================================
+# .ENV VALIDATION (called inside start_autonomous_agent)
+# ============================================================================
+def _validate_env() -> None:
+    """Warn about missing or placeholder API keys at startup."""
+    provider = os.getenv("MODEL_PROVIDER", "openai").lower()
+    key_checks = {
+        "openai":   ("OPENAI_API_KEY",   "sk-"),
+        "groq":     ("GROQ_API_KEY",     "gsk-"),
+        "cerebras": ("CEREBRAS_API_KEY", "csk-"),
+    }
+    if provider in key_checks:
+        env_var, prefix = key_checks[provider]
+        key = os.getenv(env_var, "")
+        if not key or "placeholder" in key or not key.startswith(prefix):
+            print(f"{Fore.YELLOW}[WARN] {env_var} looks like a placeholder. "
+                  f"Set a real key in .env before going live.{Style.RESET_ALL}", flush=True)
+    oalgo_key = os.getenv("OPENALGO_API_KEY", "")
+    if not oalgo_key or oalgo_key in ("your-openalgo-api-key-here", "mock-openalgo-key-safe-mode"):
+        print(f"{Fore.YELLOW}[WARN] OPENALGO_API_KEY not configured — broker calls will fail. "
+              f"Run run_safe.py for testing.{Style.RESET_ALL}", flush=True)
+    if PAPER_TRADING:
+        print(f"{Fore.CYAN}[PAPER TRADING] Enabled — orders will be simulated, no real trades placed.{Style.RESET_ALL}", flush=True)
+
+# ============================================================================
 # MODEL CONFIGURATION (Model Agnostic - OpenAI, Groq, Cerebras, or Custom)
 # ============================================================================
 
@@ -470,7 +530,7 @@ def check_all_risk_constraints(trades: str) -> Dict[str, Any]:
         for trade in trades_list:
             symbol = trade["symbol"]
             action = trade["action"]
-            risk_result = check_risk_constraints(symbol, action)
+            risk_result = _check_risk_constraints_impl(symbol, action)
             results.append({
                 "symbol": symbol,
                 "action": action,
@@ -689,6 +749,57 @@ def analyze_past_trades(symbol: str) -> Dict[str, Any]:
     }
 
 
+def _check_risk_constraints_impl(symbol: str, action: str) -> Dict[str, Any]:
+    """Core risk validation — callable by both the tool wrapper and the bulk checker."""
+    print(f"{Fore.YELLOW}[RISK CHECK] Validating {action} for {symbol}...{Style.RESET_ALL}", flush=True)
+
+    # Daily stop-loss check
+    if trade_state["stop_loss_hit"]:
+        print(f"{Fore.RED}[RISK BLOCKED] Daily loss limit reached{Style.RESET_ALL}", flush=True)
+        return {"allowed": False, "reason": "Daily loss limit reached — no new trades"}
+
+    if trade_state["daily_pnl"] <= DAILY_STOP_LOSS:
+        trade_state["stop_loss_hit"] = True
+        print(f"{Fore.RED}[RISK BLOCKED] Daily stop-loss hit: Rs.{trade_state['daily_pnl']:.2f}{Style.RESET_ALL}", flush=True)
+        return {"allowed": False, "reason": f"Daily stop-loss hit (Rs.{trade_state['daily_pnl']:.2f})"}
+
+    # Per-symbol trade cap
+    if trade_state["trade_counts"][symbol] >= MAX_TRADES_PER_SYMBOL:
+        print(f"{Fore.RED}[RISK BLOCKED] Max trades reached for {symbol}{Style.RESET_ALL}", flush=True)
+        return {"allowed": False, "reason": f"Max trades reached for {symbol} ({MAX_TRADES_PER_SYMBOL}/day)"}
+
+    # Position check (no pyramiding; shorting is allowed)
+    try:
+        print(f"{Fore.YELLOW}[CHECKING] Current positions for {symbol}...{Style.RESET_ALL}", flush=True)
+        response = client.positionbook()
+        has_position = False
+        position_qty = 0
+        if response.get("status") == "success":
+            for pos in response["data"]:
+                if pos["symbol"] == symbol and int(pos["quantity"]) != 0:
+                    has_position = True
+                    position_qty = int(pos["quantity"])
+                    break
+
+        if action == "BUY" and has_position and position_qty > 0:
+            print(f"{Fore.RED}[RISK BLOCKED] Cannot BUY {symbol} — already long (Qty: {position_qty}){Style.RESET_ALL}", flush=True)
+            return {"allowed": False, "reason": f"Already long in {symbol} (Qty: {position_qty}). Close first."}
+        elif action == "SELL" and has_position and position_qty < 0:
+            print(f"{Fore.RED}[RISK BLOCKED] Cannot SELL {symbol} — already short (Qty: {position_qty}){Style.RESET_ALL}", flush=True)
+            return {"allowed": False, "reason": f"Already short in {symbol} (Qty: {position_qty}). Close first."}
+    except Exception as e:
+        print(f"{Fore.RED}[ERROR] Failed to check positions: {e}{Style.RESET_ALL}", flush=True)
+
+    # Time check (no new trades after 3:15 PM)
+    now = datetime.now(IST)
+    if now.hour >= 15 and now.minute >= 15:
+        print(f"{Fore.RED}[RISK BLOCKED] Market closing time{Style.RESET_ALL}", flush=True)
+        return {"allowed": False, "reason": "Market closing time — no new trades after 3:15 PM"}
+
+    print(f"{Fore.YELLOW}[RISK PASSED] {action} allowed for {symbol}{Style.RESET_ALL}", flush=True)
+    return {"allowed": True, "reason": "All risk checks passed"}
+
+
 @function_tool
 def check_risk_constraints(symbol: str, action: str) -> Dict[str, Any]:
     """Validate trade against all risk management rules.
@@ -699,81 +810,7 @@ def check_risk_constraints(symbol: str, action: str) -> Dict[str, Any]:
     - Cannot add to existing long (must close first)
     - Cannot add to existing short (must close first)
     """
-    print(f"{Fore.YELLOW}[RISK CHECK] Validating {action} for {symbol}...{Style.RESET_ALL}", flush=True)
-
-    # Daily stop-loss check
-    if trade_state["stop_loss_hit"]:
-        print(f"{Fore.RED}[RISK BLOCKED] Daily loss limit reached{Style.RESET_ALL}", flush=True)
-        return {
-            "allowed": False,
-            "reason": "Daily loss limit reached — no new trades"
-        }
-
-    if trade_state["daily_pnl"] <= DAILY_STOP_LOSS:
-        trade_state["stop_loss_hit"] = True
-        print(f"{Fore.RED}[RISK BLOCKED] Daily stop-loss hit: Rs.{trade_state['daily_pnl']:.2f}{Style.RESET_ALL}", flush=True)
-        return {
-            "allowed": False,
-            "reason": f"Daily stop-loss hit (Rs.{trade_state['daily_pnl']:.2f})"
-        }
-
-    # Per-symbol trade cap
-    if trade_state["trade_counts"][symbol] >= MAX_TRADES_PER_SYMBOL:
-        print(f"{Fore.RED}[RISK BLOCKED] Max trades reached for {symbol}{Style.RESET_ALL}", flush=True)
-        return {
-            "allowed": False,
-            "reason": f"Max trades reached for {symbol} ({MAX_TRADES_PER_SYMBOL}/day)"
-        }
-
-    # Get current positions from OpenAlgo
-    # Shorting is ALLOWED - can SELL without BUY (creates short position)
-    try:
-        print(f"{Fore.YELLOW}[CHECKING] Current positions for {symbol}...{Style.RESET_ALL}", flush=True)
-        response = client.positionbook()
-        has_position = False
-        position_qty = 0
-
-        if response.get("status") == "success":
-            for pos in response["data"]:
-                if pos["symbol"] == symbol and int(pos["quantity"]) != 0:
-                    has_position = True
-                    position_qty = int(pos["quantity"])
-                    break
-
-        # Check if trying to add to existing position (not allowed)
-        if action == "BUY" and has_position and position_qty > 0:
-            # Already long, cannot add more longs
-            print(f"{Fore.RED}[RISK BLOCKED] Cannot BUY {symbol} - Already have long position (Qty: {position_qty}){Style.RESET_ALL}", flush=True)
-            return {
-                "allowed": False,
-                "reason": f"Already have long position in {symbol} (Qty: {position_qty}). Must close first."
-            }
-        elif action == "SELL" and has_position and position_qty < 0:
-            # Already short, cannot add more shorts
-            print(f"{Fore.RED}[RISK BLOCKED] Cannot SELL {symbol} - Already have short position (Qty: {position_qty}){Style.RESET_ALL}", flush=True)
-            return {
-                "allowed": False,
-                "reason": f"Already have short position in {symbol} (Qty: {position_qty}). Must close first."
-            }
-
-        # Shorting allowed: SELL without position creates short position
-        # Covering allowed: BUY to close short position
-        # All other cases allowed
-
-    except Exception as e:
-        print(f"{Fore.RED}[ERROR] Failed to check positions: {str(e)}{Style.RESET_ALL}", flush=True)
-
-    # Time check (no trades after 3:15 PM)
-    now = datetime.now(IST)
-    if now.hour >= 15 and now.minute >= 15:
-        print(f"{Fore.RED}[RISK BLOCKED] Market closing time{Style.RESET_ALL}", flush=True)
-        return {
-            "allowed": False,
-            "reason": "Market closing time — no new trades after 3:15 PM"
-        }
-
-    print(f"{Fore.YELLOW}[RISK PASSED] {action} allowed for {symbol}{Style.RESET_ALL}", flush=True)
-    return {"allowed": True, "reason": "All risk checks passed"}
+    return _check_risk_constraints_impl(symbol, action)
 
 
 @function_tool
@@ -810,24 +847,27 @@ def place_bulk_orders(orders: str) -> Dict[str, Any]:
                     results[index] = {"symbol": symbol, "success": False, "error": "Invalid quantity"}
                     return
 
-                # Place market order
-                response = client.placeorder(
-                    strategy="AI Agent",
-                    symbol=symbol,
-                    action=action,
-                    exchange=EXCHANGE,
-                    price_type="MARKET",
-                    product=PRODUCT,
-                    quantity=quantity
-                )
-
-                if response.get("status") != "success":
-                    print(f"{Fore.RED}[ORDER FAILED] {symbol} {action}: {response.get('message')}{Style.RESET_ALL}", flush=True)
-                    results[index] = {"symbol": symbol, "success": False, "error": response.get("message")}
-                    return
-
-                order_id = response["orderid"]
-                print(f"{Fore.MAGENTA}[ORDER {index+1}] {symbol} {action} {quantity} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
+                # Place market order (or simulate in paper trading mode)
+                if PAPER_TRADING:
+                    import random as _rand
+                    order_id = f"PAPER{_rand.randint(10000, 99999)}"
+                    print(f"{Fore.CYAN}[PAPER TRADING] SIMULATED [{index+1}]: {action} {quantity} x {symbol} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
+                else:
+                    response = client.placeorder(
+                        strategy="AI Agent",
+                        symbol=symbol,
+                        action=action,
+                        exchange=EXCHANGE,
+                        price_type="MARKET",
+                        product=PRODUCT,
+                        quantity=quantity
+                    )
+                    if response.get("status") != "success":
+                        print(f"{Fore.RED}[ORDER FAILED] {symbol} {action}: {response.get('message')}{Style.RESET_ALL}", flush=True)
+                        results[index] = {"symbol": symbol, "success": False, "error": response.get("message")}
+                        return
+                    order_id = response["orderid"]
+                    print(f"{Fore.MAGENTA}[ORDER {index+1}] {symbol} {action} {quantity} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
 
                 # Update state
                 trade_state["trade_counts"][symbol] += 1
@@ -901,23 +941,26 @@ def place_market_order(symbol: str, action: str, quantity: int, reason: str) -> 
         if quantity <= 0:
             return {"success": False, "error": f"Invalid quantity: {quantity}"}
 
-        # Place market order
-        response = client.placeorder(
-            strategy="AI Agent",
-            symbol=symbol,
-            action=action,
-            exchange=EXCHANGE,
-            price_type="MARKET",
-            product=PRODUCT,
-            quantity=quantity
-        )
-
-        if response.get("status") != "success":
-            print(f"{Fore.RED}[ORDER FAILED] {symbol} {action}: {response.get('message')}{Style.RESET_ALL}", flush=True)
-            return {"success": False, "error": response.get("message")}
-
-        order_id = response["orderid"]
-        print(f"{Fore.MAGENTA}[ORDER PLACED] {symbol} {action} {quantity} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
+        # Place market order (or simulate in paper trading mode)
+        if PAPER_TRADING:
+            import random as _rand
+            order_id = f"PAPER{_rand.randint(10000, 99999)}"
+            print(f"{Fore.CYAN}[PAPER TRADING] SIMULATED: {action} {quantity} x {symbol} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
+        else:
+            response = client.placeorder(
+                strategy="AI Agent",
+                symbol=symbol,
+                action=action,
+                exchange=EXCHANGE,
+                price_type="MARKET",
+                product=PRODUCT,
+                quantity=quantity
+            )
+            if response.get("status") != "success":
+                print(f"{Fore.RED}[ORDER FAILED] {symbol} {action}: {response.get('message')}{Style.RESET_ALL}", flush=True)
+                return {"success": False, "error": response.get("message")}
+            order_id = response["orderid"]
+            print(f"{Fore.MAGENTA}[ORDER PLACED] {symbol} {action} {quantity} → Order #{order_id} ({reason}){Style.RESET_ALL}", flush=True)
 
         # Update state (market orders fill immediately)
         trade_state["trade_counts"][symbol] += 1
@@ -989,29 +1032,29 @@ def _square_off_all_positions_direct():
             print(f"{Fore.YELLOW}[SQUARE OFF] {symbol}: Closing {quantity} qty with {action} {close_qty}{Style.RESET_ALL}", flush=True)
 
             try:
-                # Place market order to close position
-                order_response = client.placeorder(
-                    strategy="AI Agent",
-                    symbol=symbol,
-                    action=action,
-                    exchange=exchange,
-                    price_type="MARKET",
-                    product=product,
-                    quantity=close_qty
-                )
-
-                if order_response.get("status") == "success":
-                    order_id = order_response.get("orderid")
-                    print(f"{Fore.GREEN}[SQUARE OFF] {symbol}: Order #{order_id} placed to close position{Style.RESET_ALL}", flush=True)
-                    closed_positions.append({
-                        "symbol": symbol,
-                        "quantity": quantity,
-                        "action": action,
-                        "order_id": order_id
-                    })
+                # Place market order to close position (or simulate in paper trading mode)
+                if PAPER_TRADING:
+                    import random as _rand
+                    order_id = f"PAPER{_rand.randint(10000, 99999)}"
+                    print(f"{Fore.CYAN}[PAPER TRADING] SIMULATED SQUARE-OFF: {symbol} {action} {close_qty} → Order #{order_id}{Style.RESET_ALL}", flush=True)
+                    closed_positions.append({"symbol": symbol, "quantity": quantity, "action": action, "order_id": order_id})
                 else:
-                    print(f"{Fore.RED}[SQUARE OFF] {symbol}: Failed to place order - {order_response}{Style.RESET_ALL}", flush=True)
-                    failed_positions.append({"symbol": symbol, "error": order_response})
+                    order_response = client.placeorder(
+                        strategy="AI Agent",
+                        symbol=symbol,
+                        action=action,
+                        exchange=exchange,
+                        price_type="MARKET",
+                        product=product,
+                        quantity=close_qty
+                    )
+                    if order_response.get("status") == "success":
+                        order_id = order_response.get("orderid")
+                        print(f"{Fore.GREEN}[SQUARE OFF] {symbol}: Order #{order_id} placed to close position{Style.RESET_ALL}", flush=True)
+                        closed_positions.append({"symbol": symbol, "quantity": quantity, "action": action, "order_id": order_id})
+                    else:
+                        print(f"{Fore.RED}[SQUARE OFF] {symbol}: Failed to place order - {order_response}{Style.RESET_ALL}", flush=True)
+                        failed_positions.append({"symbol": symbol, "error": order_response})
 
             except Exception as e:
                 print(f"{Fore.RED}[SQUARE OFF] {symbol}: Exception - {str(e)}{Style.RESET_ALL}", flush=True)
@@ -1129,6 +1172,7 @@ ITC: HOLD (mixed signals)""",
         # Account tools
         get_account_snapshot,
         get_current_positions,
+        analyze_past_trades,
         # Legacy individual tools (fallback only - avoid)
         check_risk_constraints,
         calculate_position_size,
@@ -1185,16 +1229,23 @@ async def run_trading_cycle():
     # Each trading cycle is independent and doesn't need conversation history
     print(f"{Fore.CYAN}{AGENT_ICONS['streaming']} [PROCESSING] Agent analyzing markets...{Style.RESET_ALL}", flush=True)
 
-    try:
-        final_result = await Runner.run(
-            trading_agent,
-            input=query,
-            max_turns=60  # 5 symbols × ~8 tools per symbol (quotes, depth, history, risk, calc, order) + retries
-            # No session parameter - each cycle is stateless to prevent token bloat
-        )
-    except Exception as e:
-        print(f"{Fore.RED}[ERROR] Trading cycle failed: {str(e)}{Style.RESET_ALL}", flush=True)
-        print(f"{Fore.YELLOW}[INFO] Skipping this cycle, will retry in next scheduled run{Style.RESET_ALL}", flush=True)
+    final_result = None
+    for _attempt in range(1, 3):  # up to 2 attempts per cycle
+        try:
+            final_result = await Runner.run(
+                trading_agent,
+                input=query,
+                max_turns=60  # 5 symbols × ~8 tools per symbol + retries
+            )
+            break  # success — exit retry loop
+        except Exception as e:
+            if _attempt < 2:
+                print(f"{Fore.YELLOW}[RETRY] Cycle attempt {_attempt} failed: {e}. Retrying in 5s...{Style.RESET_ALL}", flush=True)
+                await asyncio.sleep(5)
+            else:
+                print(f"{Fore.RED}[ERROR] Trading cycle failed after 2 attempts: {e}{Style.RESET_ALL}", flush=True)
+                return
+    if final_result is None:
         return
 
     # Print usage statistics
@@ -1305,6 +1356,8 @@ async def start_autonomous_agent():
     print(f"Max Trade Per Symbol for the Day: {MAX_TRADES_PER_SYMBOL}", flush=True)
     print(f"Square-Off Time: {SQUARE_OFF_HOUR}:{SQUARE_OFF_MINUTE:02d} PM IST", flush=True)
     print("\n" + "="*80 + "\n", flush=True)
+
+    _validate_env()
 
     # Initialize trading state
     await initialize_trading_state()
