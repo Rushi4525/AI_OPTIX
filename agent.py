@@ -793,11 +793,12 @@ def _check_risk_constraints_impl(symbol: str, action: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"{Fore.RED}[ERROR] Failed to check positions: {e}{Style.RESET_ALL}", flush=True)
 
-    # Time check (no new trades after 3:15 PM)
-    now = datetime.now(IST)
-    if now.hour >= 15 and now.minute >= 15:
-        print(f"{Fore.RED}[RISK BLOCKED] Market closing time{Style.RESET_ALL}", flush=True)
-        return {"allowed": False, "reason": "Market closing time — no new trades after 3:15 PM"}
+    # Time check (no new trades after 3:15 PM) — skipped in paper trading mode
+    if not PAPER_TRADING:
+        now = datetime.now(IST)
+        if now.hour >= 15 and now.minute >= 15:
+            print(f"{Fore.RED}[RISK BLOCKED] Market closing time{Style.RESET_ALL}", flush=True)
+            return {"allowed": False, "reason": "Market closing time — no new trades after 3:15 PM"}
 
     print(f"{Fore.YELLOW}[RISK PASSED] {action} allowed for {symbol}{Style.RESET_ALL}", flush=True)
     return {"allowed": True, "reason": "All risk checks passed"}
@@ -1171,22 +1172,24 @@ async def run_trading_cycle():
     print(f"Trading Cycle: {now.strftime('%Y-%m-%d %H:%M:%S IST')}", flush=True)
     print(f"{'='*80}", flush=True)
 
-    # Check if outside trading hours (before market open or after square-off time)
-    if now.hour < MARKET_OPEN_HOUR or (now.hour == MARKET_OPEN_HOUR and now.minute < MARKET_OPEN_MINUTE):
-        print(f"\n{Fore.YELLOW}[INFO] Market not open yet. Trading starts at {MARKET_OPEN_HOUR}:{MARKET_OPEN_MINUTE:02d} AM IST.{Style.RESET_ALL}", flush=True)
-        return
+    # ── Market hours gate (skipped entirely in Paper Trading mode) ──────────
+    if not PAPER_TRADING:
+        if now.hour < MARKET_OPEN_HOUR or (now.hour == MARKET_OPEN_HOUR and now.minute < MARKET_OPEN_MINUTE):
+            print(f"\n{Fore.YELLOW}[INFO] Market not open yet. Trading starts at {MARKET_OPEN_HOUR}:{MARKET_OPEN_MINUTE:02d} AM IST.{Style.RESET_ALL}", flush=True)
+            return
 
-    if now.hour > SQUARE_OFF_HOUR or (now.hour == SQUARE_OFF_HOUR and now.minute >= SQUARE_OFF_MINUTE):
-        # After square-off time
-        if not trade_state.get("squared_off_today", False):
-            print("\nMarket Closing Time - Squaring Off All Positions", flush=True)
-            _square_off_all_positions_direct()
-            _cancel_all_pending_orders_direct()
-            trade_state["squared_off_today"] = True
-            print(f"\n{Fore.GREEN}[DONE] Square-off completed. No more trading today.{Style.RESET_ALL}", flush=True)
-        else:
-            print(f"\n{Fore.CYAN}[INFO] Market closed. Trading resumes at {MARKET_OPEN_HOUR}:{MARKET_OPEN_MINUTE:02d} AM IST tomorrow.{Style.RESET_ALL}", flush=True)
-        return
+        if now.hour > SQUARE_OFF_HOUR or (now.hour == SQUARE_OFF_HOUR and now.minute >= SQUARE_OFF_MINUTE):
+            if not trade_state.get("squared_off_today", False):
+                print("\nMarket Closing Time - Squaring Off All Positions", flush=True)
+                _square_off_all_positions_direct()
+                _cancel_all_pending_orders_direct()
+                trade_state["squared_off_today"] = True
+                print(f"\n{Fore.GREEN}[DONE] Square-off completed. No more trading today.{Style.RESET_ALL}", flush=True)
+            else:
+                print(f"\n{Fore.CYAN}[INFO] Market closed. Trading resumes at {MARKET_OPEN_HOUR}:{MARKET_OPEN_MINUTE:02d} AM IST tomorrow.{Style.RESET_ALL}", flush=True)
+            return
+    else:
+        print(f"{Fore.CYAN}[PAPER] 24/7 mode — market hours check skipped.{Style.RESET_ALL}", flush=True)
 
     print("\nStarting autonomous trading workflow...", flush=True)
 
@@ -1334,7 +1337,11 @@ async def start_autonomous_agent():
     print(f"Max Investment/Trade: Rs.{MAX_INVESTMENT_PER_TRADE:,}", flush=True)
     print(f"Daily Stop-Loss: Rs.{DAILY_STOP_LOSS:,}", flush=True)
     print(f"Max Trade Per Symbol for the Day: {MAX_TRADES_PER_SYMBOL}", flush=True)
-    print(f"Square-Off Time: {SQUARE_OFF_HOUR}:{SQUARE_OFF_MINUTE:02d} PM IST", flush=True)
+    if PAPER_TRADING:
+        print(f"{Fore.CYAN}Mode: PAPER TRADING — 24/7, no real orders, no market hours limit{Style.RESET_ALL}", flush=True)
+    else:
+        print(f"{Fore.RED}Mode: LIVE TRADING — real orders, NSE hours only{Style.RESET_ALL}", flush=True)
+        print(f"Square-Off Time: {SQUARE_OFF_HOUR}:{SQUARE_OFF_MINUTE:02d} PM IST", flush=True)
     print("\n" + "="*80 + "\n", flush=True)
 
     _validate_env()
@@ -1345,36 +1352,41 @@ async def start_autonomous_agent():
     # Setup scheduler
     scheduler = AsyncIOScheduler(timezone=IST)
 
-    # Run every 5 minutes during market hours (9:15 AM - 3:30 PM)
-    scheduler.add_job(
-        run_trading_cycle,
-        'cron',
-        day_of_week='mon-fri',
-        hour='9-15',
-        minute='*/5',
-        id='trading_cycle'
-    )
-
-    # Reset state at end of day
-    scheduler.add_job(
-        reset_daily_state,
-        'cron',
-        day_of_week='mon-fri',
-        hour=DAILY_RESET_HOUR,
-        minute=DAILY_RESET_MINUTE,
-        id='daily_reset'
-    )
+    if PAPER_TRADING:
+        # Paper trading: run every 5 minutes, 24/7, all days
+        scheduler.add_job(
+            run_trading_cycle,
+            'interval',
+            minutes=5,
+            id='trading_cycle'
+        )
+        print(f"{Fore.CYAN}[PAPER] Scheduler: every 5 minutes, 24/7 (no market hours restriction){Style.RESET_ALL}\n", flush=True)
+    else:
+        # Live trading: only during NSE market hours, weekdays
+        scheduler.add_job(
+            run_trading_cycle,
+            'cron',
+            day_of_week='mon-fri',
+            hour='9-15',
+            minute='*/5',
+            id='trading_cycle'
+        )
+        # Reset state at end of trading day (live only)
+        scheduler.add_job(
+            reset_daily_state,
+            'cron',
+            day_of_week='mon-fri',
+            hour=DAILY_RESET_HOUR,
+            minute=DAILY_RESET_MINUTE,
+            id='daily_reset'
+        )
+        print("Scheduler started - Agent will run every 5 minutes during market hours\n", flush=True)
 
     scheduler.start()
-    print("Scheduler started - Agent will run every 5 minutes during market hours\n", flush=True)
 
-    # Run immediately for testing if during market hours
-    now = datetime.now(IST)
-    if MARKET_OPEN_HOUR <= now.hour < SQUARE_OFF_HOUR or (now.hour == SQUARE_OFF_HOUR and now.minute < SQUARE_OFF_MINUTE):
-        print("Running initial test cycle...\n", flush=True)
-        await run_trading_cycle()
-    else:
-        print(f"{Fore.YELLOW}Outside market hours ({MARKET_OPEN_HOUR}:{MARKET_OPEN_MINUTE:02d} AM - {SQUARE_OFF_HOUR}:{SQUARE_OFF_MINUTE:02d} PM). Waiting for next scheduled run.{Style.RESET_ALL}\n", flush=True)
+    # Run one cycle immediately on startup
+    print("Running initial cycle...\n", flush=True)
+    await run_trading_cycle()
     
     # Keep running
     try:

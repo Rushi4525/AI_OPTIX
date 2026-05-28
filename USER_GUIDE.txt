@@ -1,0 +1,637 @@
+================================================================================
+  AI_OPTIX  —  Complete User Guide
+  Autonomous AI Trading Agent  |  by Greek Spark
+================================================================================
+
+Last Updated : 2026-05-28
+Version      : 1.0 (Paper Trading Ready)
+Support      : sahil.doshi@greeksoft.co.in
+
+
+────────────────────────────────────────────────────────────────────────────────
+TABLE OF CONTENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  1.  What Is AI_OPTIX?
+  2.  Folder Structure
+  3.  Quick Start (3 steps)
+  4.  API Keys — How To Get Them
+  5.  The .env File — Full Reference
+  6.  Paper Trading Mode (PAPER_TRADING=true)
+  7.  Live Trading Mode (PAPER_TRADING=false)
+  8.  Dashboard UI Guide
+  9.  Running Without a Real Broker (Mock Broker)
+  10. Risk Management Rules
+  11. Trading Schedule
+  12. Model Providers (Groq / Cerebras / OpenAI)
+  13. Common Commands
+  14. Troubleshooting
+  15. Safety Checklist Before Going Live
+  16. Glossary
+
+
+────────────────────────────────────────────────────────────────────────────────
+1. WHAT IS AI_OPTIX?
+────────────────────────────────────────────────────────────────────────────────
+
+AI_OPTIX is a fully autonomous AI-powered trading agent that:
+
+  • Monitors 5 NSE stocks every 5 minutes: ICICIBANK, RELIANCE, SBIN, WIPRO, ITC
+  • Analyzes 7 technical indicators: RSI, MACD, Bollinger Bands, EMA (20/50),
+    Stochastic, ADX, ATR
+  • Makes BUY / SELL / HOLD decisions using a Groq/Cerebras/OpenAI language model
+  • Executes trades automatically via OpenAlgo broker bridge
+  • Enforces strict risk rules: daily stop-loss, per-stock trade limits, no pyramiding
+  • Provides a beautiful real-time web dashboard at http://127.0.0.1:8080
+
+  In PAPER TRADING mode it runs 24/7 with simulated orders — safe to test
+  anytime, any day.
+
+  In LIVE TRADING mode it only runs during NSE market hours
+  (Monday–Friday, 9:15 AM – 3:15 PM IST) and places real orders.
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. FOLDER STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+  AI_OPTIX/
+  ├── agent.py                  Core trading agent (AI decisions + order placement)
+  ├── dashboard.py              Web dashboard server (FastAPI)
+  ├── mock_broker_server.py     Fake broker for testing (no real account needed)
+  ├── test_full_cycle.py        Run one complete test cycle manually
+  ├── run_safe.py               Safe demo mode — fully mocked AI + broker
+  ├── .env                      YOUR API KEYS — never commit this file
+  ├── .env.example              Template showing all available settings
+  ├── USER_GUIDE.txt            This file
+  ├── README.md                 Quick-start readme
+  ├── ARCHITECTURE.md           Technical architecture deep-dive
+  ├── MODEL_CONFIG.md           Model provider comparison
+  ├── pyproject.toml            Python dependencies
+  ├── uv.lock                   Dependency lock file
+  └── templates/
+      └── dashboard.html        Dashboard UI (Tailwind + Alpine.js)
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. QUICK START (3 STEPS)
+────────────────────────────────────────────────────────────────────────────────
+
+  Step 1 — Open .env and paste your Groq API key:
+  ─────────────────────────────────────────────────
+    GROQ_API_KEY=gsk_your_actual_key_here
+
+    (Get a free key at https://console.groq.com → API Keys → Create key)
+
+  Step 2 — Start the dashboard (it auto-starts the mock broker):
+  ──────────────────────────────────────────────────────────────
+    cd ~/Desktop/AI_OPTIX
+    ~/.local/bin/uv run python dashboard.py
+
+  Step 3 — Open the dashboard in your browser:
+  ─────────────────────────────────────────────
+    http://127.0.0.1:8080
+
+    Click the green  ▶ Start Agent  button.
+    The agent runs every 5 minutes in paper trading mode (24/7).
+
+  That's it — you're running AI_OPTIX in safe paper trading mode!
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. API KEYS — HOW TO GET THEM
+────────────────────────────────────────────────────────────────────────────────
+
+  ── GROQ (Required for AI decisions) ───────────────────────────────────────
+
+    1. Go to   https://console.groq.com
+    2. Sign up or log in
+    3. Click "API Keys" in the left sidebar
+    4. Click "Create API Key"
+    5. Give it a name (e.g. "AI_OPTIX")
+    6. Copy the key — it starts with  gsk_
+    7. Paste it in .env:   GROQ_API_KEY=gsk_your_key_here
+
+    Free tier limits: 6,000 tokens/minute
+    For more capacity, upgrade to Dev tier ($10/month) at console.groq.com
+
+  ── CEREBRAS (Optional — faster alternative to Groq) ───────────────────────
+
+    1. Go to   https://cloud.cerebras.ai
+    2. Sign up → Dashboard → API Keys → New API Key
+    3. Copy the key — it starts with  csk_
+    4. Paste in .env:
+         MODEL_PROVIDER=cerebras
+         CEREBRAS_API_KEY=csk_your_key_here
+
+    Cerebras runs at 1800+ tokens/second (much faster than Groq).
+    Recommended for production live trading.
+
+  ── OPENALGO (Required for real broker orders) ──────────────────────────────
+
+    OpenAlgo is a free, open-source broker bridge. You need it only for
+    LIVE trading. For paper trading, the mock broker handles everything.
+
+    1. Go to   https://openalgo.in
+    2. Follow the installation guide for your operating system
+    3. Connect your broker account (Zerodha, Angel One, Fyers, etc.)
+    4. OpenAlgo runs locally at http://127.0.0.1:5000
+    5. Get your API key from the OpenAlgo dashboard
+    6. Paste in .env:   OPENALGO_API_KEY=your_openalgo_key
+
+    ⚠ You do NOT need OpenAlgo for paper trading.
+      The mock_broker_server.py handles all broker calls locally.
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. THE .env FILE — FULL REFERENCE
+────────────────────────────────────────────────────────────────────────────────
+
+  Open the file  AI_OPTIX/.env  to configure everything.
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ Setting              │ Values            │ Description                  │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ MODEL_PROVIDER       │ groq / cerebras   │ Which AI to use              │
+  │                      │ openai / custom   │                              │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ GROQ_API_KEY         │ gsk_...           │ Your Groq key                │
+  │ GROQ_MODEL           │ groq/llama-3.1-   │ Optional: override model     │
+  │                      │ 8b-instant        │                              │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ CEREBRAS_API_KEY     │ csk_...           │ Your Cerebras key            │
+  │ CEREBRAS_MODEL       │ cerebras/gpt-oss- │ Optional: override model     │
+  │                      │ 120b              │                              │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ OPENAI_API_KEY       │ sk-...            │ Your OpenAI key (optional)   │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ OPENALGO_API_KEY     │ your-key          │ Broker bridge key            │
+  │ OPENALGO_HOST        │ http://127.0.0.1  │ OpenAlgo server address      │
+  │                      │ :5000             │                              │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ PAPER_TRADING        │ true / false      │ ← THE MOST IMPORTANT SETTING │
+  │                      │                   │ true  = simulated, 24/7      │
+  │                      │                   │ false = real money, NSE hrs  │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ MAX_INVESTMENT_PER   │ 10000             │ Rs. per trade (default 10K)  │
+  │ _TRADE               │                   │                              │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ DAILY_STOP_LOSS      │ -10000            │ Rs. max daily loss allowed   │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ MAX_TRADES_PER_SYMBOL│ 5                 │ Max trades per stock per day │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  Example minimal .env for paper trading with Groq:
+
+    MODEL_PROVIDER=groq
+    GROQ_API_KEY=gsk_your_key_here
+    OPENALGO_API_KEY=mock-key-aioptix-greekspark
+    OPENALGO_HOST=http://127.0.0.1:5000
+    PAPER_TRADING=true
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. PAPER TRADING MODE  (PAPER_TRADING=true)
+────────────────────────────────────────────────────────────────────────────────
+
+  Paper trading is the SAFE way to test and learn before risking real money.
+
+  What it does:
+    • Runs 24 hours a day, 7 days a week — NO market hours restriction
+    • Makes real AI decisions using actual technical analysis
+    • Instead of sending orders to a broker, it prints:
+        [PAPER TRADING] SIMULATED: BUY 7 x ICICIBANK → Order #PAPER82585
+    • Tracks simulated P&L, trade counts, and positions in memory
+    • All risk rules still apply (stop-loss, trade limits, no pyramiding)
+
+  How to enable:
+    In .env:   PAPER_TRADING=true
+
+  When to switch off paper trading:
+    Only when you have:
+    ✅ Watched at least 1 full week of cycles without errors
+    ✅ Understood every BUY/SELL decision the agent makes
+    ✅ Set up OpenAlgo with your broker account
+    ✅ Verified your API keys are all working
+    ✅ Accepted the financial risks involved
+
+  STRONGLY RECOMMENDED: Run paper trading for at least 2 weeks first.
+
+
+────────────────────────────────────────────────────────────────────────────────
+7. LIVE TRADING MODE  (PAPER_TRADING=false)
+────────────────────────────────────────────────────────────────────────────────
+
+  ⚠️  WARNING: Live mode places REAL orders with REAL money.
+      Only enable this after thorough paper trading testing.
+
+  Requirements before switching to live:
+    1. OpenAlgo installed and connected to your broker
+    2. OPENALGO_API_KEY set to your real key (not the mock key)
+    3. Broker account funded with trading capital
+    4. At least 1 full week of successful paper trading
+    5. Understanding of all risk parameters
+
+  What changes in live mode:
+    • Market hours enforced: runs only 9:15 AM – 3:15 PM IST, Mon–Fri
+    • Auto square-off at 3:15 PM every trading day
+    • Daily P&L reset at 3:45 PM
+    • Real orders sent to your broker via OpenAlgo
+    • Real money at risk
+
+  To enable:
+    In .env:   PAPER_TRADING=false
+    Also set:  OPENALGO_API_KEY=your_real_openalgo_key
+
+  Start with small capital (e.g. Rs. 50,000) and verify first trades
+  manually in your broker app before scaling up.
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. DASHBOARD UI GUIDE
+────────────────────────────────────────────────────────────────────────────────
+
+  URL: http://127.0.0.1:8080
+
+  How to start the dashboard:
+    cd ~/Desktop/AI_OPTIX
+    ~/.local/bin/uv run python dashboard.py
+
+  ── Header (top bar) ──────────────────────────────────────────────────────
+
+    🎯 AI_OPTIX        Brand logo
+    ⚡ Paper            Badge showing current mode (Paper = safe, Live = real)
+    NSE Open/Closed    Real-time market status
+    HH:MM:SS IST       Live IST clock
+    🌙 Dark / ☀️ Light  Theme toggle — click to switch themes
+                       Your preference is saved in the browser
+    Live / Offline     WebSocket connection status
+    ▶ Start Agent      Click to start the trading agent
+    ⏹ Stop Agent       Click to stop the trading agent
+
+  ── KPI Cards (4 boxes) ──────────────────────────────────────────────────
+
+    Daily P&L       Today's profit/loss in Rs.
+                    Green = profit, Red = loss
+                    Progress bar shows how close to stop-loss limit
+
+    Available Cash  Broker account balance
+
+    Open Positions  Number of currently open trades
+
+    Trades Today    Total orders placed today (max 25 across all 5 symbols)
+
+  ── Symbol Cards (5 cards, one per stock) ─────────────────────────────────
+
+    ICICIBANK         Stock name
+    ₹1,347.50         Current price (LTP — Last Traded Price)
+    +0.52%            Price change from yesterday's close
+    [Sparkline chart] Last 20 price bars as a mini chart
+    RSI  45.2         Relative Strength Index (0–100)
+                        < 30 = Oversold (green bar) — potential BUY signal
+                        > 70 = Overbought (red bar)  — potential SELL signal
+                        30–70 = Neutral (blue bar)
+    MACD  BULL        MACD signal: BULL = bullish, BEAR = bearish
+    EMA   BULL        EMA20 vs EMA50: BULL = uptrend, BEAR = downtrend
+    [BUY badge]       Last decision made by the AI for this stock
+    Vol 15.3L         Trading volume in lakhs
+    2/5 trades        Trades used today vs maximum allowed
+
+  ── Open Positions (left middle panel) ───────────────────────────────────
+
+    Shows all currently open trades with:
+    • Symbol name
+    • Direction (LONG = bought, SHORT = sold short)
+    • Quantity (number of shares)
+    • Average entry price
+    • Current P&L (profit/loss)
+
+  ── Agent Status (right middle panel) ────────────────────────────────────
+
+    SVG arc countdown   Visual countdown to next trading cycle
+    Status              Running (green dot) or Idle (gray dot)
+    Model               AI model being used (e.g. groq/llama-3.1-8b-instant)
+    Provider            AI provider (Groq, Cerebras, or OpenAI)
+    Mode                Paper Trading or Live Trading
+    Stop-Loss bar       How much of the daily loss limit has been used
+    Trade Limits        Per-symbol bars showing trades used vs allowed today
+
+  ── Trade History (left bottom panel) ────────────────────────────────────
+
+    A live scrolling feed of all orders placed this session:
+    • Time (IST)
+    • Stock symbol
+    • Action badge (BUY = green, SELL = red, HOLD = gray)
+    • Quantity
+    • Paper order ID (e.g. PAPER82585) or real broker order ID
+
+  ── System Panel (right bottom panel) ────────────────────────────────────
+
+    Broker            Connected (green) or Disconnected (red)
+    OpenAlgo Host     Address of the broker bridge
+    Paper Trading     ON/OFF status
+    Market            Open or Closed with hours
+    Dashboard Uptime  How long the dashboard has been running
+    WS Connection     WebSocket status (Live = real-time updates active)
+
+  ── Theme Toggle ──────────────────────────────────────────────────────────
+
+    Click the 🌙 Dark / ☀️ Light button in the header to switch themes.
+    Your choice is remembered in the browser's local storage — it persists
+    across page refreshes and sessions.
+
+
+────────────────────────────────────────────────────────────────────────────────
+9. RUNNING WITHOUT A REAL BROKER (MOCK BROKER)
+────────────────────────────────────────────────────────────────────────────────
+
+  The mock broker simulates all broker API calls locally. It generates
+  realistic synthetic market data for all 5 NSE stocks.
+
+  It is automatically started by the dashboard — you don't need to run it
+  manually when using the dashboard.
+
+  For manual testing or running agent.py directly, start it yourself:
+
+    # Terminal 1
+    python mock_broker_server.py
+
+    # Terminal 2
+    ~/.local/bin/uv run python agent.py
+
+  The mock broker handles:
+    ✓ quotes()          — live price data
+    ✓ depth()           — bid/ask order book
+    ✓ history()         — 120 bars of synthetic OHLCV for TA-Lib
+    ✓ funds()           — returns Rs. 5,00,000 virtual cash
+    ✓ positionbook()    — returns empty positions (clean slate)
+    ✓ placeorder()      — returns a fake order ID (MOCK12345)
+    ✓ cancelallorder()  — simulated cancel
+
+  Mock broker runs at:  http://127.0.0.1:5000
+  Dashboard runs at:    http://127.0.0.1:8080
+
+  Fully safe mode (no API keys needed at all):
+    ~/.local/bin/uv run python run_safe.py
+
+
+────────────────────────────────────────────────────────────────────────────────
+10. RISK MANAGEMENT RULES
+────────────────────────────────────────────────────────────────────────────────
+
+  The agent has 5 layers of built-in protection:
+
+  1. DAILY STOP-LOSS (default: -Rs. 10,000)
+     If total daily P&L reaches -Rs. 10,000, ALL trading stops for the day.
+     No new orders are placed until the next day's reset at 3:45 PM IST.
+
+  2. TRADE COUNT LIMIT (default: 5 per symbol per day)
+     Each stock can have at most 5 trades per day.
+     Total maximum: 25 trades/day (5 stocks × 5 trades each).
+
+  3. NO PYRAMIDING (position protection)
+     Cannot BUY a stock you already hold long.
+     Cannot SELL a stock you already hold short.
+     Must close the existing position first.
+
+  4. MARKET HOURS (live mode only)
+     No new trades after 3:15 PM IST.
+     All positions auto-closed (square-off) at 3:15 PM.
+     (This rule is bypassed in paper trading mode.)
+
+  5. FIXED POSITION SIZE (default: Rs. 10,000 per trade)
+     Quantity = floor(10000 / current_price)
+     e.g. ICICIBANK at Rs. 1347 → floor(10000/1347) = 7 shares
+
+  To change these defaults, add to .env:
+    MAX_INVESTMENT_PER_TRADE=10000
+    DAILY_STOP_LOSS=-10000
+    MAX_TRADES_PER_SYMBOL=5
+
+
+────────────────────────────────────────────────────────────────────────────────
+11. TRADING SCHEDULE
+────────────────────────────────────────────────────────────────────────────────
+
+  PAPER TRADING MODE (PAPER_TRADING=true):
+  ─────────────────────────────────────────
+    Runs every 5 minutes, all day, every day (24/7)
+    No market hours restriction
+    No square-off, no daily reset
+    Safe to run overnight
+
+  LIVE TRADING MODE (PAPER_TRADING=false):
+  ─────────────────────────────────────────
+    ┌────────────────┬────────────────────────────────────────────────┐
+    │ Time (IST)     │ Action                                         │
+    ├────────────────┼────────────────────────────────────────────────┤
+    │ 9:15 AM        │ Market opens — agent starts trading            │
+    │ Every 5 min    │ Trading cycle: fetch → analyze → decide → order│
+    │ 3:15 PM        │ Square-off: all open positions closed           │
+    │ 3:45 PM        │ Daily reset: P&L and trade counts cleared       │
+    └────────────────┴────────────────────────────────────────────────┘
+    Runs Monday – Friday only (NSE trading days)
+
+
+────────────────────────────────────────────────────────────────────────────────
+12. MODEL PROVIDERS
+────────────────────────────────────────────────────────────────────────────────
+
+  Set MODEL_PROVIDER in .env to choose your AI engine:
+
+  ┌────────────┬───────────────────────┬──────────┬───────────┬───────────┐
+  │ Provider   │ Model                 │ Speed    │ Cost      │ Best For  │
+  ├────────────┼───────────────────────┼──────────┼───────────┼───────────┤
+  │ groq       │ llama-3.1-8b-instant  │ Fast     │ Free*     │ Dev/Test  │
+  │ cerebras   │ gpt-oss-120b          │ Fastest  │ Free*     │ Production│
+  │ openai     │ gpt-5-mini            │ Slow     │ Paid      │ Accuracy  │
+  └────────────┴───────────────────────┴──────────┴───────────┴───────────┘
+
+  * Free tier has token-per-minute limits. Groq free = 6,000 TPM.
+    Cerebras free tier has significantly higher limits.
+
+  Recommendation:
+    → Start with Groq (free, easy setup)
+    → Move to Cerebras for production live trading (faster, fewer rate limits)
+
+  To switch to Cerebras:
+    MODEL_PROVIDER=cerebras
+    CEREBRAS_API_KEY=csk_your_key_here
+
+
+────────────────────────────────────────────────────────────────────────────────
+13. COMMON COMMANDS
+────────────────────────────────────────────────────────────────────────────────
+
+  Navigate to the project folder first:
+    cd ~/Desktop/AI_OPTIX
+
+  ── Start the full dashboard (RECOMMENDED) ───────────────────────────────
+    ~/.local/bin/uv run python dashboard.py
+    → Opens at http://127.0.0.1:8080
+    → Starts mock broker automatically
+
+  ── Run agent directly (without dashboard) ───────────────────────────────
+    ~/.local/bin/uv run python agent.py
+
+  ── Run one test cycle (no real AI, fully mocked) ────────────────────────
+    ~/.local/bin/uv run python run_safe.py
+
+  ── Run one full cycle with real AI + mock broker ─────────────────────────
+    python mock_broker_server.py &
+    ~/.local/bin/uv run python test_full_cycle.py
+
+  ── Start mock broker manually ────────────────────────────────────────────
+    python mock_broker_server.py
+    → Runs on http://127.0.0.1:5000
+
+  ── Install/update dependencies ──────────────────────────────────────────
+    ~/.local/bin/uv sync
+
+  ── View today's log file ────────────────────────────────────────────────
+    cat trading_agent_$(date +%Y%m%d).log
+
+  ── Check if mock broker is running ──────────────────────────────────────
+    curl http://127.0.0.1:5000/health
+
+
+────────────────────────────────────────────────────────────────────────────────
+14. TROUBLESHOOTING
+────────────────────────────────────────────────────────────────────────────────
+
+  Problem: "Rate limit reached" error
+  ──────────────────────────────────
+  Cause:  Groq free tier has a 6,000 token/minute limit.
+  Fix:    Wait 60 seconds between test runs.
+          Or switch to Cerebras (higher free limits).
+          Or upgrade Groq to Dev tier.
+
+  Problem: "Connection refused" on port 5000
+  ──────────────────────────────────────────
+  Cause:  Mock broker is not running.
+  Fix:    Run:  python mock_broker_server.py
+          Or use the dashboard which auto-starts the mock broker.
+
+  Problem: "[WARN] GROQ_API_KEY looks like a placeholder"
+  ────────────────────────────────────────────────────────
+  Cause:  The key in .env is still the example placeholder.
+  Fix:    Open .env and replace gsk-paste-your-key-here
+          with your real Groq API key from console.groq.com
+
+  Problem: Dashboard shows all zeros / "Reconnecting..."
+  ───────────────────────────────────────────────────────
+  Cause:  WebSocket lost connection or server not running.
+  Fix:    Refresh the page. If still broken, restart:
+          ~/.local/bin/uv run python dashboard.py
+
+  Problem: Agent runs but no orders placed
+  ─────────────────────────────────────────
+  Cause:  Either no signals strong enough (need 3+ aligned indicators),
+          or stop-loss already hit, or max trade count reached.
+  Fix:    Check the dashboard's Trade History for "HOLD" reasons.
+          Reset paper trading state by restarting agent.py.
+
+  Problem: "Module not found" error
+  ─────────────────────────────────
+  Fix:    cd ~/Desktop/AI_OPTIX && ~/.local/bin/uv sync
+
+  Problem: TA-Lib ImportError
+  ────────────────────────────
+  Fix:    ~/.local/bin/uv run pip install TA-Lib
+          (Linux: sudo apt-get install ta-lib first)
+
+  Problem: Port 8080 already in use
+  ──────────────────────────────────
+  Fix:    Kill the existing process:
+          kill $(lsof -ti:8080)
+          Then restart the dashboard.
+
+
+────────────────────────────────────────────────────────────────────────────────
+15. SAFETY CHECKLIST BEFORE GOING LIVE
+────────────────────────────────────────────────────────────────────────────────
+
+  Complete every item before changing PAPER_TRADING=false:
+
+  □ I have run paper trading for at least 2 weeks
+  □ I understand all the BUY/SELL decisions the agent makes
+  □ I have never seen unexpected errors in the dashboard
+  □ I have installed and configured OpenAlgo with my broker
+  □ I have set OPENALGO_API_KEY to my real key (not the mock key)
+  □ I have set a stop-loss I am comfortable with (DAILY_STOP_LOSS)
+  □ I have set a trade size I am comfortable with (MAX_INVESTMENT_PER_TRADE)
+  □ I have read the risk disclaimer in README.md
+  □ I am prepared to monitor the dashboard during market hours
+  □ I understand that AI decisions can be wrong and losses can occur
+  □ I have started with a small capital amount (recommended: Rs. 50,000)
+
+  ⚠️  AI_OPTIX is NOT a guaranteed profit machine.
+      Algorithmic trading carries significant financial risk.
+      Past simulated performance does not predict future real results.
+      Trade at your own risk. You are solely responsible for all trades.
+
+
+────────────────────────────────────────────────────────────────────────────────
+16. GLOSSARY
+────────────────────────────────────────────────────────────────────────────────
+
+  ADX     Average Directional Index — measures trend strength (not direction)
+          > 25 = strong trend, < 20 = weak/no trend
+
+  ATR     Average True Range — measures price volatility
+          Used to calibrate stop-loss distances
+
+  Bollinger Bands
+          Price channel based on 20-period moving average ± 2 standard deviations
+          Price near lower band = oversold; near upper band = overbought
+
+  EMA     Exponential Moving Average — trend direction indicator
+          EMA 20 > EMA 50 = uptrend (bullish); EMA 20 < EMA 50 = downtrend
+
+  HOLD    No action taken — signals are mixed or too weak
+
+  IST     Indian Standard Time (UTC+5:30)
+
+  LTP     Last Traded Price — the most recent price a stock traded at
+
+  MACD    Moving Average Convergence Divergence — momentum indicator
+          MACD > Signal line = bullish momentum; MACD < Signal = bearish
+
+  MIS     Margin Intraday Square-off — intraday product type (NSE)
+          All MIS positions are automatically closed by the broker at 3:20 PM
+
+  NSE     National Stock Exchange of India
+
+  OpenAlgo  Open-source broker bridge that connects the agent to your broker
+            Works with Zerodha, Angel One, Fyers, and many more
+
+  Paper Trading
+          Simulated trading — same logic as live trading but no real money
+          Orders are fake; P&L is tracked but not real
+
+  Pyramiding
+          Adding to an existing position (buying more of something you already own)
+          AI_OPTIX blocks pyramiding to prevent over-exposure
+
+  RSI     Relative Strength Index — momentum oscillator (0–100 scale)
+          < 30 = oversold (potential buy signal)
+          > 70 = overbought (potential sell signal)
+          30–70 = neutral
+
+  Square-Off
+          Closing all open positions — happens automatically at 3:15 PM in live mode
+
+  Stop-Loss
+          A pre-set level at which trading stops to prevent further losses
+          Default: -Rs. 10,000 daily loss limit
+
+  TPM     Tokens Per Minute — rate limit for AI API calls
+
+  uv      Fast Python package manager used by AI_OPTIX
+          Installed at ~/.local/bin/uv
+
+
+────────────────────────────────────────────────────────────────────────────────
+  AI_OPTIX  v1.0  |  by Greek Spark  |  sahil.doshi@greeksoft.co.in
+  GitHub: https://github.com/Rushi4525/AI_OPTIX
+================================================================================
