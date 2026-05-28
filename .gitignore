@@ -1,9 +1,14 @@
-# Python
+# ─── Python bytecode ────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
+*.egg
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# ─── Build & dist ────────────────────────────────────────────────────────────
 build/
 develop-eggs/
 dist/
@@ -16,12 +21,8 @@ parts/
 sdist/
 var/
 wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual Environments
+# ─── Virtual environments ────────────────────────────────────────────────────
 .env
 .venv
 env/
@@ -30,7 +31,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# ─── IDE ─────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
@@ -38,60 +39,55 @@ venv.bak/
 *~
 .DS_Store
 
-# Project-specific
-.env                    # Environment variables with API keys
-trading_memory.db       # Trading database
-trading_memory.db-shm   # SQLite shared memory
-trading_memory.db-wal   # SQLite write-ahead log
-trade_history_*.json    # Daily trade history files
-*.log                   # Log files
-*.db                    # All database files
+# ─── AI_OPTIX project-specific ───────────────────────────────────────────────
+# API keys — never commit this
+.env
+
+# Log files (date-stamped, generated at runtime)
+*.log
+trading_agent_*.log
+
+# SQLite databases
+trading_memory.db
+trading_memory.db-shm
+trading_memory.db-wal
+*.db
 *.db-shm
 *.db-wal
 
-# Backup and temporary files
+# Daily trade history JSON exports
+trade_history_*.json
+
+# ─── Temporary / backup ──────────────────────────────────────────────────────
 *.bak
 *.backup
-*~
 *.tmp
 *.temp
 *.old
 *copy.py
 *copy.md
 
-# Testing
+# ─── Testing ─────────────────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 
-# Documentation builds
+# ─── Docs builds ─────────────────────────────────────────────────────────────
 docs/_build/
 site/
 
-# OS
+# ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# UV lock file (keep uv.lock but ignore local cache)
+# ─── uv cache (keep uv.lock but not local cache) ─────────────────────────────
 .uv/
 
-# Claude Code
+# ─── Claude Code ─────────────────────────────────────────────────────────────
 .claude/
 
-# Jupyter
+# ─── Jupyter ─────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-downloads/
-eggs/
-.eggs/
-parts/
-sdist/
-var/
-wheels/
