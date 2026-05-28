@@ -1,7 +1,7 @@
 [project]
-name = "autonomous-agents"
+name = "ai-optix"
 version = "0.1.0"
-description = "OpenAlgo Autonomous AI Trading Agent"
+description = "AI_OPTIX - Autonomous AI Trading Agent by Greek Spark"
 requires-python = ">=3.12"
 dependencies = [
     "openai>=1.0.0",

@@ -1,4 +1,4 @@
-# Autonomous Trading Agent
+# AI_OPTIX - Autonomous Trading Agent by Greek Spark
 
 > Ultra-fast, AI-powered algorithmic trading system with 70% faster execution and 79% lower costs
 
@@ -43,8 +43,8 @@ An autonomous AI trading agent that analyzes technical indicators in real-time, 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/marketcalls/Agentic-Trader.git
-cd Agentic-Trader
+git clone https://github.com/GreekSpark/AI_OPTIX.git
+cd AI_OPTIX
 
 # 2. Install uv package manager
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -236,8 +236,8 @@ brew install ta-lib
 
 ```bash
 # Clone repository
-git clone <repo-url>
-cd autonomous-agents
+git clone https://github.com/GreekSpark/AI_OPTIX.git
+cd AI_OPTIX
 
 # Install dependencies
 uv sync
@@ -458,7 +458,7 @@ For more troubleshooting help, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 ## Project Structure
 
 ```
-autonomous-agents/
+AI_OPTIX/
 ├── agent.py                 # Main trading agent (run this)
 ├── .env                     # Your API keys (gitignored)
 ├── .env.example            # Example configuration template
@@ -482,8 +482,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ```bash
 # Clone for development
-git clone <repo-url>
-cd autonomous-agents
+git clone https://github.com/GreekSpark/AI_OPTIX.git
+cd AI_OPTIX
 
 # Create virtual environment
 uv venv

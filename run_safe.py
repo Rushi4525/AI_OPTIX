@@ -1,6 +1,6 @@
 """
-Agentic-Trader -- Safe Development Mode
-========================================
+AI_OPTIX -- Safe Development Mode
+====================================
 Runs one complete trading cycle with ALL external APIs mocked:
   - OpenAlgo broker  : returns synthetic market data, no real orders placed
   - AI model         : returns a deterministic simulated decision, no API key needed
@@ -188,7 +188,7 @@ Runner.run = classmethod(_mock_runner_run_impl)
 # PHASE 4: IMPORT AGENT (picks up mocked openalgo + patched Runner)
 # =============================================================================
 print("=" * 72, flush=True)
-print("[SAFE MODE] Agentic-Trader -- SAFE DEVELOPMENT MODE", flush=True)
+print("[SAFE MODE] AI_OPTIX by Greek Spark -- SAFE DEVELOPMENT MODE", flush=True)
 print("[SAFE MODE] Broker API : fully mocked (no network connection)", flush=True)
 print("[SAFE MODE] AI model   : simulated   (no API key required)", flush=True)
 print("[SAFE MODE] Orders     : simulated   -- ZERO real capital at risk", flush=True)

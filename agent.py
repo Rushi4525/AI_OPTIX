@@ -1,5 +1,5 @@
 """
-OpenAlgo Autonomous AI Trading Agent
+AI_OPTIX - Autonomous AI Trading Agent by Greek Spark
 Self-learning agent that makes data-driven trading decisions
 """
 
@@ -8,8 +8,8 @@ import io
 import os
 
 # Suppress TensorFlow warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO and WARNING messages
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'  # Keep oneDNN optimizations but suppress message
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'
 
 # Force UTF-8 encoding for console output (Windows compatibility)
 if sys.platform == "win32":
@@ -21,6 +21,14 @@ from agents.run import Runner
 from agents.tool import function_tool
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.extensions.memory.sqlalchemy_session import SQLAlchemySession
+
+# Disable OpenAI Agents SDK tracing — we use Groq/Cerebras, not OpenAI
+import agents as _agents_sdk
+_agents_sdk.set_tracing_disabled(True)
+# Silence litellm success/info banners
+import litellm as _litellm
+_litellm.suppress_debug_info = True
+_litellm.set_verbose = False
 from openalgo import api
 from dotenv import load_dotenv
 import asyncio
@@ -30,9 +38,26 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 from typing import Dict, Any, List
 import json
+from pydantic import BaseModel
 from colorama import Fore, Back, Style, init
 import talib
 import numpy as np
+
+# ── Typed input schemas for bulk tools (required for strict SDK schema) ──────
+
+class TradeCheck(BaseModel):
+    symbol: str
+    action: str   # "BUY" or "SELL"
+
+class PositionInput(BaseModel):
+    symbol: str
+    ltp: float
+
+class OrderInput(BaseModel):
+    symbol: str
+    action: str   # "BUY" or "SELL"
+    quantity: int
+    reason: str = "AI decision"
 
 # Initialize colorama for Windows compatibility
 init(autoreset=True)
@@ -82,14 +107,14 @@ def _validate_env() -> None:
     """Warn about missing or placeholder API keys at startup."""
     provider = os.getenv("MODEL_PROVIDER", "openai").lower()
     key_checks = {
-        "openai":   ("OPENAI_API_KEY",   "sk-"),
-        "groq":     ("GROQ_API_KEY",     "gsk-"),
-        "cerebras": ("CEREBRAS_API_KEY", "csk-"),
+        "openai":   ("OPENAI_API_KEY",   ("sk-",)),
+        "groq":     ("GROQ_API_KEY",     ("gsk-", "gsk_")),  # Groq uses both prefixes
+        "cerebras": ("CEREBRAS_API_KEY", ("csk-", "csk_")),
     }
     if provider in key_checks:
-        env_var, prefix = key_checks[provider]
+        env_var, prefixes = key_checks[provider]
         key = os.getenv(env_var, "")
-        if not key or "placeholder" in key or not key.startswith(prefix):
+        if not key or "placeholder" in key or not any(key.startswith(p) for p in prefixes):
             print(f"{Fore.YELLOW}[WARN] {env_var} looks like a placeholder. "
                   f"Set a real key in .env before going live.{Style.RESET_ALL}", flush=True)
     oalgo_key = os.getenv("OPENALGO_API_KEY", "")
@@ -507,22 +532,13 @@ def get_historical_data(symbol: str, lookback_bars: int = 5) -> Dict[str, Any]:
 
 
 @function_tool
-def check_all_risk_constraints(trades: str) -> Dict[str, Any]:
-    """Validate multiple trades at once (bulk risk check).
-
-    Args:
-        trades: JSON string with format: [{"symbol": "ICICIBANK", "action": "BUY"}, ...]
-
-    Returns:
-        Risk check results for all trades
-    """
-    import json
-
+def check_all_risk_constraints(trades: List[TradeCheck]) -> Dict[str, Any]:
+    """Validate multiple trades at once. Pass a list of TradeCheck objects {symbol, action}."""
     try:
-        trades_list = json.loads(trades)
+        trades_list = [t.model_dump() if hasattr(t, 'model_dump') else t for t in trades]
 
         if not isinstance(trades_list, list):
-            return {"success": False, "error": "trades must be a JSON array"}
+            return {"success": False, "error": "trades must be a list"}
 
         print(f"{Fore.YELLOW}[BULK RISK CHECK] Checking {len(trades_list)} trades...{Style.RESET_ALL}", flush=True)
 
@@ -543,29 +559,18 @@ def check_all_risk_constraints(trades: str) -> Dict[str, Any]:
 
         return {"success": True, "results": results}
 
-    except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 @function_tool
-def calculate_all_position_sizes(positions: str) -> Dict[str, Any]:
-    """Calculate position sizes for multiple symbols at once (bulk calculation).
-
-    Args:
-        positions: JSON string with format: [{"symbol": "ICICIBANK", "ltp": 1350.0}, ...]
-
-    Returns:
-        Position size calculations for all symbols
-    """
-    import json
-
+def calculate_all_position_sizes(positions: List[PositionInput]) -> Dict[str, Any]:
+    """Calculate position sizes for multiple symbols. Pass a list of {symbol, ltp} objects."""
     try:
-        positions_list = json.loads(positions)
+        positions_list = [p.model_dump() if hasattr(p, 'model_dump') else p for p in positions]
 
         if not isinstance(positions_list, list):
-            return {"success": False, "error": "positions must be a JSON array"}
+            return {"success": False, "error": "positions must be a list"}
 
         print(f"{Fore.CYAN}[BULK POSITION CALC] Calculating sizes for {len(positions_list)} symbols...{Style.RESET_ALL}", flush=True)
 
@@ -589,8 +594,6 @@ def calculate_all_position_sizes(positions: str) -> Dict[str, Any]:
 
         return {"success": True, "results": results}
 
-    except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -814,24 +817,15 @@ def check_risk_constraints(symbol: str, action: str) -> Dict[str, Any]:
 
 
 @function_tool
-def place_bulk_orders(orders: str) -> Dict[str, Any]:
-    """Place multiple market orders at once (batch processing).
-
-    Args:
-        orders: JSON string with format: [{"symbol": "ICICIBANK", "action": "BUY", "quantity": 7, "reason": "bullish"}, ...]
-
-    Returns:
-        Results for all orders placed
-    """
-    import json
+def place_bulk_orders(orders: List[OrderInput]) -> Dict[str, Any]:
+    """Place multiple market orders. Pass a list of {symbol, action, quantity, reason} objects."""
     import threading
 
     try:
-        # Parse orders JSON
-        orders_list = json.loads(orders)
+        orders_list = [o.model_dump() if hasattr(o, 'model_dump') else o for o in orders]
 
         if not isinstance(orders_list, list):
-            return {"success": False, "error": "orders must be a JSON array"}
+            return {"success": False, "error": "orders must be a list"}
 
         print(f"{Fore.MAGENTA}[BULK ORDER] Placing {len(orders_list)} orders in parallel...{Style.RESET_ALL}", flush=True)
 
@@ -845,6 +839,13 @@ def place_bulk_orders(orders: str) -> Dict[str, Any]:
 
                 if quantity <= 0:
                     results[index] = {"symbol": symbol, "success": False, "error": "Invalid quantity"}
+                    return
+
+                # Hard risk gate — re-validate every order regardless of what the AI decided
+                risk = _check_risk_constraints_impl(symbol, action)
+                if not risk.get("allowed", False):
+                    print(f"{Fore.RED}[RISK GATE BLOCKED] {symbol} {action}: {risk.get('reason')}{Style.RESET_ALL}", flush=True)
+                    results[index] = {"symbol": symbol, "success": False, "blocked": True, "reason": risk.get("reason")}
                     return
 
                 # Place market order (or simulate in paper trading mode)
@@ -922,8 +923,6 @@ def place_bulk_orders(orders: str) -> Dict[str, Any]:
             "results": [results[i] for i in sorted(results.keys())]
         }
 
-    except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON format: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1142,44 +1141,20 @@ AGENT_ICONS = {
     "calculator": "🧮"         # Position Calculator - Abacus
 }
 
-# Single Autonomous Trading Agent (calls all tools directly for speed)
+# Single Autonomous Trading Agent — minimal toolset to stay within free-tier TPM limits
 trading_agent = Agent(
     name=f"{AGENT_ICONS['coordinator']} Autonomous Trading Agent",
-    instructions="""Process 5 symbols. Plain text. NO MARKDOWN.
-
-STEP 1: get_all_market_data() ONCE → all data for all 5 symbols
-STEP 2: For each symbol, decide BUY/SELL/HOLD (RSI, MACD, EMA signals)
-STEP 3: For each trade decision:
-  - check_risk_constraints(symbol, action)
-  - calculate_position_size(symbol, ltp)
-  - Add to orders list if allowed
-STEP 4: place_bulk_orders() ONCE with complete JSON array
-
-CRITICAL: Keep reasons SHORT (2-4 words)
-
-OUTPUT FORMAT (plain text, one line per symbol):
-ICICIBANK: BUY Order#123 (MACD bullish)
-RELIANCE: HOLD (weak signals)
-SBIN: HOLD (existing position)
-WIPRO: SELL Order#124 (take profit)
-ITC: HOLD (mixed signals)""",
+    instructions="""Plain text only. No markdown. Four steps only:
+1. get_all_market_data()
+2. check_all_risk_constraints(trades=JSON) with your BUY/SELL decisions
+3. calculate_all_position_sizes(positions=JSON) for allowed trades only
+4. place_bulk_orders(orders=JSON) with allowed+sized orders
+Output: one line per symbol — SYMBOL: ACTION reason""",
     tools=[
-        # Bulk operations (FAST - use these)
         get_all_market_data,
         check_all_risk_constraints,
         calculate_all_position_sizes,
         place_bulk_orders,
-        # Account tools
-        get_account_snapshot,
-        get_current_positions,
-        analyze_past_trades,
-        # Legacy individual tools (fallback only - avoid)
-        check_risk_constraints,
-        calculate_position_size,
-        place_market_order,
-        get_market_quotes,
-        get_market_depth,
-        get_historical_data
     ],
     model=trading_model
 )
@@ -1230,7 +1205,7 @@ async def run_trading_cycle():
     print(f"{Fore.CYAN}{AGENT_ICONS['streaming']} [PROCESSING] Agent analyzing markets...{Style.RESET_ALL}", flush=True)
 
     final_result = None
-    for _attempt in range(1, 3):  # up to 2 attempts per cycle
+    for _attempt in range(1, 4):  # up to 3 attempts per cycle
         try:
             final_result = await Runner.run(
                 trading_agent,
@@ -1239,11 +1214,16 @@ async def run_trading_cycle():
             )
             break  # success — exit retry loop
         except Exception as e:
-            if _attempt < 2:
-                print(f"{Fore.YELLOW}[RETRY] Cycle attempt {_attempt} failed: {e}. Retrying in 5s...{Style.RESET_ALL}", flush=True)
-                await asyncio.sleep(5)
+            err_str = str(e)
+            # Extract wait time from rate-limit errors (e.g. "try again in 17.5s")
+            import re as _re2
+            wait_match = _re2.search(r'try again in (\d+\.?\d*)s', err_str)
+            wait_secs = float(wait_match.group(1)) + 2 if wait_match else 30
+            if _attempt < 3:
+                print(f"{Fore.YELLOW}[RETRY] Cycle attempt {_attempt} failed: {e}. Retrying in {wait_secs:.0f}s...{Style.RESET_ALL}", flush=True)
+                await asyncio.sleep(wait_secs)
             else:
-                print(f"{Fore.RED}[ERROR] Trading cycle failed after 2 attempts: {e}{Style.RESET_ALL}", flush=True)
+                print(f"{Fore.RED}[ERROR] Trading cycle failed after 3 attempts: {e}{Style.RESET_ALL}", flush=True)
                 return
     if final_result is None:
         return

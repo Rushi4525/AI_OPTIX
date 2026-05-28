@@ -1,4 +1,4 @@
-# 🤖 Autonomous Trading Agent - Architecture
+# AI_OPTIX - Architecture by Greek Spark
 
 **Version**: 3.1 (Production-Ready with Startup Initialization)
 **Last Updated**: January 2025
@@ -951,8 +951,8 @@ scheduler.add_job(
 
 ```bash
 # Clone repository
-git clone <repo-url>
-cd autonomous-agents
+git clone https://github.com/GreekSpark/AI_OPTIX.git
+cd AI_OPTIX
 
 # Install uv package manager
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -1017,7 +1017,7 @@ ITC: HOLD (mixed signals)
 ## File Structure
 
 ```
-autonomous-agents/
+AI_OPTIX/
 ├── agent.py                 # Main trading agent
 ├── .env                     # Environment configuration (gitignored)
 ├── .env.example            # Example configuration
