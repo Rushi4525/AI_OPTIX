@@ -25,6 +25,7 @@ os.environ.setdefault("OPENAI_API_KEY", "no-tracing-disabled")
 import litellm as _ll; _ll.suppress_debug_info = True; _ll.set_verbose = False  # noqa: E702
 
 import agent as _ag  # shared: trade_state, client, SYMBOLS, PAPER_TRADING, model_name …
+import data_fetcher as _df  # real NSE historical data via yfinance
 
 IST           = pytz.timezone("Asia/Kolkata")
 TEMPLATES     = Path(__file__).parent / "templates"
@@ -55,6 +56,11 @@ async def _lifespan(application):
             cwd=str(Path(__file__).parent),             # run from project root
         )
         await asyncio.sleep(2)                          # give it time to bind port
+    # Pre-warm yfinance cache for all symbols in parallel
+    print("[DASHBOARD] Warming yfinance cache for NSE symbols …")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_EXECUTOR, _df.warm_cache, list(_ag.SYMBOLS))
+    print("[DASHBOARD] ✓ Historical data ready")
     print("[DASHBOARD]  Open →  http://127.0.0.1:8080")
     yield
 
@@ -64,10 +70,18 @@ app = FastAPI(title="AI_OPTIX", docs_url=None, redoc_url=None, lifespan=_lifespa
 # ── Pure sync helpers (run in thread executor) ────────────────────────────────
 
 def _fetch_quote(symbol: str) -> dict:
+    """
+    Real price from Yahoo Finance (live / most-recent bar).
+    Falls back to mock broker if yfinance is unavailable.
+    """
+    q = _df.get_quote(symbol)
+    if q.get("ltp", 0) > 0:
+        return q
+    # Fallback: mock broker
     try:
         r = _ag.client.quotes(symbol=symbol, exchange="NSE")
         if r.get("status") == "success":
-            d    = r["data"]
+            d = r["data"]
             ltp  = float(d.get("ltp", 0))
             prev = float(d.get("prev_close", ltp) or ltp)
             chg  = round((ltp - prev) / prev * 100, 2) if prev else 0.0
@@ -79,44 +93,11 @@ def _fetch_quote(symbol: str) -> dict:
 
 
 def _fetch_indicators(symbol: str) -> dict:
-    _NEUTRAL = {"rsi": 50.0, "rsiSignal": "neutral",
-                "macdTrend": "neutral", "emaTrend": "neutral", "sparkData": []}
-    try:
-        end   = datetime.now(IST).strftime("%Y-%m-%d")
-        start = (datetime.now(IST) - timedelta(days=3)).strftime("%Y-%m-%d")
-        r = _ag.client.history(symbol=symbol, exchange="NSE",
-                               interval="5m", start_date=start, end_date=end)
-        if isinstance(r, dict):
-            return _NEUTRAL
-
-        close = r["close"].values
-        high  = r["high"].values
-        low   = r["low"].values
-
-        def _last(a):
-            v = a[~np.isnan(a)]
-            return round(float(v[-1]), 2) if len(v) else 0.0
-
-        rsi_a            = talib.RSI(close, 14)
-        macd_a, sig_a, _ = talib.MACD(close, 12, 26, 9)
-        ema20_a          = talib.EMA(close, 20)
-        ema50_a          = talib.EMA(close, 50)
-
-        rsi  = _last(rsi_a)
-        macd = _last(macd_a)
-        sig  = _last(sig_a)
-        e20  = _last(ema20_a)
-        e50  = _last(ema50_a)
-
-        return {
-            "rsi":       rsi,
-            "rsiSignal": "overbought" if rsi > 70 else "oversold" if rsi < 30 else "neutral",
-            "macdTrend": "bullish" if macd > sig  else "bearish",
-            "emaTrend":  "bullish" if e20  > e50  else "bearish",
-            "sparkData": [round(float(x), 2) for x in close[-20:]],
-        }
-    except Exception:
-        return _NEUTRAL
+    """
+    All 7 TA-Lib indicators on real yfinance NSE history.
+    Falls back to mock broker history if yfinance is unavailable.
+    """
+    return _df.compute_indicators(symbol)
 
 
 def _fetch_positions() -> list:
