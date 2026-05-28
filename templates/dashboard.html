@@ -189,6 +189,124 @@
     /* ── SVG arc ── */
     .arc-track { stroke: rgba(255,255,255,.07); }
     .arc-fill  { stroke: var(--accent); transition: stroke-dasharray .5s ease; stroke-linecap: round; }
+
+    /* ════════════════════════════════════════════════
+       LIGHT THEME — html.light overrides every var
+    ════════════════════════════════════════════════ */
+    html.light {
+      --bg:        #f0f5fb;
+      --bg-card:   rgba(255,255,255,0.97);
+      --bg-card2:  rgba(248,251,255,0.99);
+      --border:    rgba(203,213,225,0.75);
+      --border-hi: rgba(59,130,246,0.35);
+      --txt:       #1e293b;
+      --muted:     #475569;
+    }
+
+    html.light body {
+      background: var(--bg);
+      color: var(--txt);
+      transition: background .3s, color .3s;
+    }
+
+    html.light body::before {
+      background-image:
+        linear-gradient(rgba(148,163,184,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148,163,184,.07) 1px, transparent 1px);
+    }
+
+    html.light .card {
+      background: var(--bg-card);
+      box-shadow: 0 2px 16px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04),
+                  inset 0 1px 0 rgba(255,255,255,.9);
+    }
+
+    html.light .card-kpi { background: var(--bg-card2); }
+
+    html.light .card-kpi::before {
+      background: linear-gradient(135deg,rgba(59,130,246,.18),rgba(16,185,129,.09),transparent 60%);
+    }
+
+    /* Gray text — boost contrast on white bg */
+    html.light .text-gray-400, html.light .text-gray-500 { color: #64748b; }
+    html.light .text-gray-600 { color: #475569; }
+    html.light .text-gray-700 { color: #334155; }
+
+    /* Progress track */
+    html.light .prog-track { background: rgba(0,0,0,.07); }
+
+    /* Table row hover */
+    html.light .hover\:bg-white\/\[\.025\]:hover,
+    html.light .hover\:bg-white\/\[\.02\]:hover { background: rgba(0,0,0,.025); }
+
+    /* Borders inside cards */
+    html.light .border-white\/5,
+    html.light .border-white\/\[\.04\],
+    html.light .border-white\/\[\.07\] { border-color: rgba(203,213,225,.5); }
+
+    /* Scrollbar in light mode */
+    html.light .feed::-webkit-scrollbar-thumb { background: rgba(148,163,184,.6); }
+
+    /* Remove glow on P&L numbers (too intense on white) */
+    html.light .val-pos { text-shadow: none; }
+    html.light .val-neg { text-shadow: none; }
+
+    /* Tooltip on white */
+    html.light [data-tip]:hover::after {
+      background: rgba(255,255,255,.98); color: #1e293b;
+      border: 1px solid rgba(148,163,184,.4);
+      box-shadow: 0 4px 12px rgba(0,0,0,.1);
+    }
+
+    /* SVG arc track in light */
+    html.light .arc-fill { stroke: #3b82f6; }
+
+    /* Symbol card hover in light */
+    html.light .sym-card:hover { border-color: rgba(99,102,241,.35) !important; }
+
+    /* Logo glow — softer in light */
+    html.light .logo-text { text-shadow: 0 0 16px rgba(99,102,241,.25) !important; }
+
+    /* Transition everything smoothly */
+    body, .card, .card-kpi, .badge, .prog-track, .kpi-val {
+      transition: background .25s ease, color .25s ease,
+                  border-color .25s ease, box-shadow .25s ease;
+    }
+
+    /* ── Theme toggle pill ── */
+    .theme-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px 5px 8px;
+      border-radius: 99px;
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      transition: all .22s ease;
+      user-select: none;
+    }
+    .theme-btn-dark {
+      background: rgba(99,102,241,.12);
+      border: 1px solid rgba(99,102,241,.28);
+      color: #a5b4fc;
+    }
+    .theme-btn-dark:hover {
+      background: rgba(99,102,241,.2);
+      border-color: rgba(99,102,241,.45);
+    }
+    .theme-btn-light {
+      background: rgba(251,191,36,.1);
+      border: 1px solid rgba(251,191,36,.35);
+      color: #d97706;
+    }
+    .theme-btn-light:hover {
+      background: rgba(251,191,36,.18);
+      border-color: rgba(251,191,36,.55);
+    }
+    /* Sliding knob inside pill */
+    .theme-knob {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      font-size: 12px;
+      transition: transform .22s ease;
+    }
   </style>
 </head>
 
@@ -203,7 +321,7 @@
     <!-- Brand -->
     <div class="flex items-center gap-3 flex-shrink-0">
       <div>
-        <div class="text-xl font-bold tracking-tight leading-none" style="text-shadow:0 0 24px rgba(99,102,241,.5)">
+        <div class="logo-text text-xl font-bold tracking-tight leading-none" style="text-shadow:0 0 24px rgba(99,102,241,.5)">
           🎯 AI_OPTIX
         </div>
         <div class="text-[10px] text-gray-500 tracking-widest uppercase font-medium mt-0.5">by Greek Spark</div>
@@ -224,6 +342,19 @@
       <div class="mono text-gray-400 text-sm" x-text="clock"></div>
       <div class="text-gray-600 text-xs" x-text="s.kpi ? s.kpi.availableCash > 0 ? '' : '' : ''"></div>
     </div>
+
+    <!-- Theme toggle -->
+    <button
+      @click="toggleTheme()"
+      :class="darkMode ? 'theme-btn-dark' : 'theme-btn-light'"
+      class="theme-btn"
+      :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
+    >
+      <span class="theme-knob" :style="darkMode ? '' : 'transform:rotate(20deg)'">
+        <span x-text="darkMode ? '🌙' : '☀️'"></span>
+      </span>
+      <span x-text="darkMode ? 'Dark' : 'Light'"></span>
+    </button>
 
     <!-- Agent control -->
     <div class="flex items-center gap-2">
@@ -624,12 +755,14 @@ function app() {
     // ── UI state ─────────────────────────────────────────────────────────
     wsOk:      false,
     agentBusy: false,
+    darkMode:  true,
     clock:     '--:--:--',
     _ws:       null,
     _charts:   {},
 
     // ── Init ─────────────────────────────────────────────────────────────
     init() {
+      this._initTheme();
       this._tickClock();
       setInterval(() => this._tickClock(), 1000);
       this._connectWS();
@@ -687,6 +820,28 @@ function app() {
       } finally {
         this.agentBusy = false;
       }
+    },
+
+    // ── Theme ─────────────────────────────────────────────────────────────
+    _initTheme() {
+      const saved = localStorage.getItem('aioptix-theme');
+      // Default = dark; switch to light if saved preference says so
+      this.darkMode = (saved !== 'light');
+      document.documentElement.classList.toggle('light', !this.darkMode);
+    },
+
+    toggleTheme() {
+      this.darkMode = !this.darkMode;
+      document.documentElement.classList.toggle('light', !this.darkMode);
+      localStorage.setItem('aioptix-theme', this.darkMode ? 'dark' : 'light');
+      // Re-colour all sparklines to match new theme
+      this.$nextTick(() => {
+        for (const sym of Object.keys(this._charts)) {
+          const ch  = this._charts[sym];
+          const sp  = this.s.symbols?.[sym]?.sparkData || [];
+          if (ch && sp.length > 0) this._updateSpark(sym, sp);
+        }
+      });
     },
 
     // ── Chart.js sparklines ───────────────────────────────────────────────
