@@ -26,10 +26,12 @@ import litellm as _ll; _ll.suppress_debug_info = True; _ll.set_verbose = False  
 
 import agent as _ag  # shared: trade_state, client, SYMBOLS, PAPER_TRADING, model_name …
 
-IST       = pytz.timezone("Asia/Kolkata")
-TEMPLATES = Path(__file__).parent / "templates"
-_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=20)
-_T0       = time.time()
+IST           = pytz.timezone("Asia/Kolkata")
+TEMPLATES     = Path(__file__).parent / "templates"
+# Absolute path — works regardless of working directory when dashboard is launched
+_BROKER_SCRIPT = str(Path(__file__).parent / "mock_broker_server.py")
+_EXECUTOR     = concurrent.futures.ThreadPoolExecutor(max_workers=20)
+_T0           = time.time()
 
 # ── Agent task state ─────────────────────────────────────────────────────────
 _agent_task: asyncio.Task | None = None
@@ -47,9 +49,12 @@ async def _lifespan(application):
         print("[DASHBOARD] Mock broker on :5000  ✓")
     except Exception:
         print("[DASHBOARD] Starting mock broker …")
-        subprocess.Popen([sys.executable, "mock_broker_server.py"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        await asyncio.sleep(1.5)
+        subprocess.Popen(
+            [sys.executable, _BROKER_SCRIPT],          # absolute path — always found
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=str(Path(__file__).parent),             # run from project root
+        )
+        await asyncio.sleep(2)                          # give it time to bind port
     print("[DASHBOARD]  Open →  http://127.0.0.1:8080")
     yield
 
@@ -276,21 +281,22 @@ async def api_broker_start():
     import urllib.request
     try:
         urllib.request.urlopen("http://127.0.0.1:5000/health", timeout=1)
-        return {"status": "already_running", "message": "Broker already running on :5000"}
+        return {"status": "already_running", "message": "✓ Broker already running on :5000"}
     except Exception:
         pass
     subprocess.Popen(
-        [sys.executable, "mock_broker_server.py"],
+        [sys.executable, _BROKER_SCRIPT],              # absolute path — always found
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=str(Path(__file__).parent),                # run from project root
     )
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(2)                             # give it time to bind port
     # Verify it started
     try:
         import urllib.request as _ur
-        _ur.urlopen("http://127.0.0.1:5000/health", timeout=2)
-        return {"status": "started", "message": "Mock broker started on :5000"}
+        _ur.urlopen("http://127.0.0.1:5000/health", timeout=3)
+        return {"status": "started", "message": "✓ Mock broker started on :5000"}
     except Exception:
-        return {"status": "error", "message": "Broker start failed — run mock_broker_server.py manually"}
+        return {"status": "error", "message": "✗ Broker start failed — open a terminal and run: python mock_broker_server.py"}
 
 
 @app.post("/api/agent/start")

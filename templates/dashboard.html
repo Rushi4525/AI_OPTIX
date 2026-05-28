@@ -741,8 +741,10 @@
 
           <!-- Status message after start attempt -->
           <p x-show="brokerMsg" x-text="brokerMsg"
-             :class="brokerMsg?.includes('started') ? 'text-buy' : 'text-sell'"
-             class="text-[10px] text-center mt-1"></p>
+             :class="(brokerMsg?.includes('✗') || brokerMsg?.toLowerCase().includes('failed') || brokerMsg?.toLowerCase().includes('error'))
+                       ? 'text-sell font-semibold'
+                       : 'text-buy font-semibold'"
+             class="text-[10px] text-center mt-1 leading-snug"></p>
         </div>
         <div class="flex justify-between items-center py-1 border-b border-white/[.04]">
           <span class="text-gray-500">Paper Trading</span>
