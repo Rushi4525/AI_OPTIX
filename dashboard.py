@@ -189,10 +189,15 @@ async def _build_state() -> dict:
                           "lastDecision": decisions[s],
                           "tradesToday":  tc.get(s, 0)}
 
+    mkt = _market_open()
     return {
-        "paper_trading":  _ag.PAPER_TRADING,
-        "agent_running":  _agent_running,
-        "market_open":    _market_open(),
+        "paper_trading":    _ag.PAPER_TRADING,
+        "agent_running":    _agent_running,
+        "market_open":      mkt,
+        # True when trading is actually possible right now
+        "trading_available": _ag.PAPER_TRADING or mkt,
+        "broker_host":      os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000"),
+        "broker_mode":      "mock" if "mock-key" in (os.getenv("OPENALGO_API_KEY","")) else "live",
         "kpi": {
             "dailyPnl":      round(daily_pnl, 2),
             "availableCash": round(cash, 2),
@@ -252,6 +257,40 @@ async def root():
 @app.get("/api/state")
 async def api_state():
     return await _build_state()
+
+
+@app.get("/api/broker/status")
+async def api_broker_status():
+    loop = asyncio.get_event_loop()
+    ok   = await loop.run_in_executor(_EXECUTOR, _broker_ok)
+    return {
+        "connected": ok,
+        "host":      os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000"),
+        "mode":      "mock" if "mock-key" in (os.getenv("OPENALGO_API_KEY","")) else "live",
+    }
+
+
+@app.post("/api/broker/start")
+async def api_broker_start():
+    """Start the mock broker server if not already running."""
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://127.0.0.1:5000/health", timeout=1)
+        return {"status": "already_running", "message": "Broker already running on :5000"}
+    except Exception:
+        pass
+    subprocess.Popen(
+        [sys.executable, "mock_broker_server.py"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    await asyncio.sleep(1.5)
+    # Verify it started
+    try:
+        import urllib.request as _ur
+        _ur.urlopen("http://127.0.0.1:5000/health", timeout=2)
+        return {"status": "started", "message": "Mock broker started on :5000"}
+    except Exception:
+        return {"status": "error", "message": "Broker start failed — run mock_broker_server.py manually"}
 
 
 @app.post("/api/agent/start")
