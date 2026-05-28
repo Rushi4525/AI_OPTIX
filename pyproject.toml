@@ -16,4 +16,6 @@ dependencies = [
     "colorama>=0.4.6",
     "ta-lib>=0.4.28",
     "aiosqlite>=0.19.0",
+    "fastapi>=0.115.0",
+    "websockets>=13.0",
 ]
